@@ -86,8 +86,18 @@ const chapterSchema = new mongoose.Schema({
   wordCount: { type: Number, default: 0 },
 }, { timestamps: true });
 
+const commentSchema = new mongoose.Schema({
+  novelId:   { type: mongoose.Schema.Types.ObjectId, ref: 'Novel', required: true },
+  userId:    { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  userName:  { type: String, required: true },
+  userAvatar:{ type: String, default: '' },
+  text:      { type: String, required: true, maxlength: 1000 },
+  likes:     [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+}, { timestamps: true });
+
 const User    = mongoose.model('User', userSchema);
 const Novel   = mongoose.model('Novel', novelSchema);
+const Comment = mongoose.model('Comment', commentSchema);
 const Chapter = mongoose.model('Chapter', chapterSchema);
 
 // ── Auth helpers ──────────────────────────────────────────────────────────────
@@ -362,6 +372,64 @@ app.post('/api/novels/:id/rate', requireAuth, async (req, res) => {
     novel.ratingCount += 1;
     await novel.save();
     res.json({ rating: novel.rating, ratingCount: novel.ratingCount });
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+// ── Comment routes ───────────────────────────────────────────────────────────
+
+// GET comments for a novel
+app.get('/api/novels/:id/comments', async (req, res) => {
+  try {
+    const { page = 1, limit = 20 } = req.query;
+    const comments = await Comment.find({ novelId: req.params.id })
+      .sort({ createdAt: -1 })
+      .limit(Number(limit))
+      .skip((Number(page) - 1) * Number(limit));
+    const total = await Comment.countDocuments({ novelId: req.params.id });
+    res.json({ comments, total, pages: Math.ceil(total / limit) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST add comment
+app.post('/api/novels/:id/comments', requireAuth, async (req, res) => {
+  try {
+    const { text } = req.body;
+    if (!text || !text.trim()) return res.status(400).json({ error: 'Comment cannot be empty' });
+    if (text.length > 1000) return res.status(400).json({ error: 'Comment too long (max 1000 chars)' });
+    const comment = await Comment.create({
+      novelId:    req.params.id,
+      userId:     req.user.id,
+      userName:   req.user.name,
+      userAvatar: req.user.avatar || '',
+      text:       text.trim(),
+    });
+    res.status(201).json(comment);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+// DELETE comment (admin or own comment)
+app.delete('/api/novels/:id/comments/:commentId', requireAuth, async (req, res) => {
+  try {
+    const comment = await Comment.findById(req.params.commentId);
+    if (!comment) return res.status(404).json({ error: 'Comment not found' });
+    const isOwner = comment.userId.toString() === req.user.id;
+    const isAdmin = req.user.role === 'admin';
+    if (!isOwner && !isAdmin) return res.status(403).json({ error: 'Not allowed' });
+    await Comment.findByIdAndDelete(req.params.commentId);
+    res.json({ message: 'Comment deleted' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST like/unlike comment
+app.post('/api/novels/:id/comments/:commentId/like', requireAuth, async (req, res) => {
+  try {
+    const comment = await Comment.findById(req.params.commentId);
+    if (!comment) return res.status(404).json({ error: 'Comment not found' });
+    const idx = comment.likes.indexOf(req.user.id);
+    if (idx === -1) { comment.likes.push(req.user.id); }
+    else { comment.likes.splice(idx, 1); }
+    await comment.save();
+    res.json({ likes: comment.likes.length, liked: idx === -1 });
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
