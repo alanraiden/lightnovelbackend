@@ -371,6 +371,51 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: err.message || 'Internal server error' });
 });
 
+
+// ── Sitemap ───────────────────────────────────────────────────────────────────
+app.get('/sitemap.xml', async (req, res) => {
+  try {
+    const siteUrl = process.env.CLIENT_URL || 'https://www.idenwebstudio.online';
+    const novels  = await Novel.find({}).select('_id updatedAt');
+    const chapters = await Chapter.find({}).select('novelId number updatedAt');
+
+    const staticPages = ['', '/browse', '/rankings', '/genres', '/updates'];
+
+    let urls = staticPages.map(p => `
+  <url>
+    <loc>${siteUrl}${p}</loc>
+    <changefreq>daily</changefreq>
+    <priority>${p === '' ? '1.0' : '0.8'}</priority>
+  </url>`).join('');
+
+    urls += novels.map(n => `
+  <url>
+    <loc>${siteUrl}/novel/${n._id}</loc>
+    <lastmod>${new Date(n.updatedAt).toISOString().split('T')[0]}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>`).join('');
+
+    urls += chapters.map(ch => `
+  <url>
+    <loc>${siteUrl}/read/${ch.novelId}/${ch.number}</loc>
+    <lastmod>${new Date(ch.updatedAt).toISOString().split('T')[0]}</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>`).join('');
+
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urls}
+</urlset>`;
+
+    res.header('Content-Type', 'application/xml');
+    res.send(xml);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/health', (_, res) => res.json({ status: 'ok', cloudinary: cloudinaryConfigured }));
 
 const PORT = process.env.PORT || 5000;
