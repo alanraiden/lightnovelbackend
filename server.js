@@ -10,6 +10,29 @@ const jwt       = require('jsonwebtoken');
 require('dotenv').config();
 
 const app = express();
+
+// ── Slug helper ───────────────────────────────────────────────────────────────
+function makeSlug(title) {
+  return title
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9\s-]/g, '')   // remove special chars
+    .replace(/\s+/g, '-')            // spaces to hyphens
+    .replace(/-+/g, '-')             // collapse multiple hyphens
+    .replace(/^-|-$/g, '');          // trim hyphens
+}
+
+async function uniqueSlug(title, excludeId = null) {
+  let slug = makeSlug(title);
+  let exists = await Novel.findOne({ slug, _id: { $ne: excludeId } });
+  let i = 2;
+  while (exists) {
+    slug = makeSlug(title) + '-' + i;
+    exists = await Novel.findOne({ slug, _id: { $ne: excludeId } });
+    i++;
+  }
+  return slug;
+}
 app.use(cors({ origin: function(o, cb) { cb(null, true); }, credentials: true }));
 app.use(express.json({ limit: '10mb' }));
 
@@ -62,6 +85,7 @@ const userSchema = new mongoose.Schema({
 
 const novelSchema = new mongoose.Schema({
   title:         { type: String, required: true },
+  slug:          { type: String, unique: true, sparse: true },  // e.g. 'shadow-slave'
   author:        { type: String, required: true },
   authorId:      { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   cover:         { type: String, default: '' },
@@ -257,6 +281,17 @@ app.get('/api/novels', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// GET novel by slug (for clean URLs)
+app.get('/api/novels/slug/:slug', async (req, res) => {
+  try {
+    const novel = await Novel.findOne({ slug: req.params.slug });
+    if (!novel) return res.status(404).json({ error: 'Novel not found' });
+    novel.views += 1;
+    await novel.save();
+    res.json(novel);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get('/api/novels/:id', async (req, res) => {
   try {
     const novel = await Novel.findById(req.params.id);
@@ -287,7 +322,10 @@ app.put('/api/novels/:id', requireOwner, handleUpload, async (req, res) => {
   try {
     const { title, description, genres, tags, status } = req.body;
     const updates = {};
-    if (title)       updates.title       = title;
+    if (title) {
+      updates.title = title;
+      updates.slug  = await uniqueSlug(title, req.params.id);
+    }
     if (description !== undefined) updates.description = description;
     if (status)      updates.status      = status;
     if (genres)      updates.genres      = JSON.parse(genres);
@@ -444,7 +482,7 @@ app.use((err, req, res, next) => {
 app.get('/sitemap.xml', async (req, res) => {
   try {
     const siteUrl = process.env.CLIENT_URL || 'https://www.idenwebstudio.online';
-    const novels  = await Novel.find({}).select('_id updatedAt');
+    const novels  = await Novel.find({}).select('_id slug updatedAt');
     const chapters = await Chapter.find({}).select('novelId number updatedAt');
 
     const staticPages = ['', '/browse', '/rankings', '/genres', '/updates'];
@@ -458,19 +496,23 @@ app.get('/sitemap.xml', async (req, res) => {
 
     urls += novels.map(n => `
   <url>
-    <loc>${siteUrl}/novel/${n._id}</loc>
+    <loc>${siteUrl}/novel/s/${n.slug || n._id}</loc>
     <lastmod>${new Date(n.updatedAt).toISOString().split('T')[0]}</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.9</priority>
   </url>`).join('');
 
-    urls += chapters.map(ch => `
+    urls += chapters.map(ch => {
+      const novel = novels.find(n => n._id.toString() === ch.novelId.toString());
+      const novelSlug = novel?.slug || ch.novelId;
+      return `
   <url>
-    <loc>${siteUrl}/read/${ch.novelId}/${ch.number}</loc>
+    <loc>${siteUrl}/read/s/${novelSlug}/${ch.number}</loc>
     <lastmod>${new Date(ch.updatedAt).toISOString().split('T')[0]}</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
-  </url>`).join('');
+  </url>`;
+    }).join('');
 
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
