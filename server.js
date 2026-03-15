@@ -305,9 +305,8 @@ app.post('/api/novels', requireAdmin, handleUpload, async (req, res) => {
   try {
     const { title, description, genres, tags, status } = req.body;
     if (!title) return res.status(400).json({ error: 'Title is required' });
-    const slug = await uniqueSlug(title);
     const novel = new Novel({
-      title, slug, description: description||'', status: status||'ongoing',
+      title, description: description||'', status: status||'ongoing',
       author:        process.env.AUTHOR_NAME || 'idenwebstudio',
       authorId:      req.user.id,
       genres: JSON.parse(genres||'[]'), tags: JSON.parse(tags||'[]'),
