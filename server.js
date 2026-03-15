@@ -528,5 +528,22 @@ ${urls}
 
 app.get('/api/health', (_, res) => res.json({ status: 'ok', cloudinary: cloudinaryConfigured }));
 
+// One-time migration — visit /api/migrate-slugs ONCE after deploying
+app.get('/api/migrate-slugs', async (req, res) => {
+  try {
+    const novels = await Novel.find({ slug: { $in: [null, '', undefined] } });
+    if (novels.length === 0) return res.json({ message: 'All novels already have slugs', updated: 0 });
+    const results = [];
+    for (const novel of novels) {
+      const slug = await uniqueSlug(novel.title, novel._id);
+      await Novel.updateOne({ _id: novel._id }, { $set: { slug } });
+      results.push({ title: novel.title, slug });
+    }
+    res.json({ message: 'Migration complete', updated: results.length, results });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log('idenwebstudio API running on port ' + PORT));
