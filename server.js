@@ -482,13 +482,8 @@ app.use((err, req, res, next) => {
 app.get('/sitemap.xml', async (req, res) => {
   try {
     const siteUrl = process.env.CLIENT_URL || 'https://www.idenwebstudio.online';
-
-    // Only fetch novels that have a slug AND at least 1 chapter
-    const novels   = await Novel.find({ slug: { $exists: true, $ne: '' }, chapterCount: { $gt: 0 } }).select('_id slug updatedAt');
-    const novelIds = novels.map(n => n._id);
-
-    // Only fetch chapters whose novelId is in the current novels list
-    const chapters = await Chapter.find({ novelId: { $in: novelIds } }).select('novelId number updatedAt');
+    const novels  = await Novel.find({}).select('_id slug updatedAt');
+    const chapters = await Chapter.find({}).select('novelId number updatedAt');
 
     const staticPages = ['', '/browse', '/rankings', '/genres', '/updates'];
 
@@ -501,7 +496,7 @@ app.get('/sitemap.xml', async (req, res) => {
 
     urls += novels.map(n => `
   <url>
-    <loc>${siteUrl}/novel/s/${n.slug}</loc>
+    <loc>${siteUrl}/novel/s/${n.slug || n._id}</loc>
     <lastmod>${new Date(n.updatedAt).toISOString().split('T')[0]}</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.9</priority>
@@ -509,15 +504,15 @@ app.get('/sitemap.xml', async (req, res) => {
 
     urls += chapters.map(ch => {
       const novel = novels.find(n => n._id.toString() === ch.novelId.toString());
-      if (!novel) return ''; // skip orphaned chapters
+      const novelSlug = novel?.slug || ch.novelId;
       return `
   <url>
-    <loc>${siteUrl}/read/s/${novel.slug}/chapter-${ch.number}</loc>
+    <loc>${siteUrl}/read/s/${novelSlug}/chapter-${ch.number}</loc>
     <lastmod>${new Date(ch.updatedAt).toISOString().split('T')[0]}</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>`;
-    }).filter(Boolean).join('');
+    }).join('');
 
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
