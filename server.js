@@ -507,7 +507,7 @@ app.get('/sitemap.xml', async (req, res) => {
       const novelSlug = novel?.slug || ch.novelId;
       return `
   <url>
-    <loc>${siteUrl}/read/s/${novelSlug}/${ch.number}</loc>
+    <loc>${siteUrl}/read/s/${novelSlug}/chapter-${ch.number}</loc>
     <lastmod>${new Date(ch.updatedAt).toISOString().split('T')[0]}</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
