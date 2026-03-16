@@ -529,6 +529,12 @@ ${urls}
 
 app.get('/api/health', (_, res) => res.json({ status: 'ok', cloudinary: cloudinaryConfigured }));
 
+app.get('/robots.txt', (req, res) => {
+  const siteUrl = process.env.CLIENT_URL || 'https://www.idenwebstudio.online';
+  res.header('Content-Type', 'text/plain');
+  res.send(`User-agent: *\nAllow: /\nSitemap: ${siteUrl}/sitemap.xml\n`);
+});
+
 // One-time migration — visit /api/migrate-slugs ONCE after deploying
 app.get('/api/migrate-slugs', async (req, res) => {
   try {
