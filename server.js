@@ -94,7 +94,6 @@ const novelSchema = new mongoose.Schema({
   genres:        [String],
   tags:          [String],
   status:        { type: String, enum: ['ongoing','completed'], default: 'ongoing' },
-  visibility:    { type: String, enum: ['public','private'], default: 'public' },
   rating:        { type: Number, default: 0 },
   ratingCount:   { type: Number, default: 0 },
   views:         { type: Number, default: 0 },
@@ -265,14 +264,11 @@ app.get('/api/auth/me', requireAuth, async (req, res) => {
 // ── Novel routes ──────────────────────────────────────────────────────────────
 app.get('/api/novels', async (req, res) => {
   try {
-    const { genre, status, sort='rating', search, limit=20, page=1, authorId, all } = req.query;
+    const { genre, status, sort='rating', search, limit=20, page=1, authorId } = req.query;
     const query = {};
     if (genre)    query.genres   = genre;
     if (status)   query.status   = status;
     if (authorId) query.authorId = authorId;
-    // Admin can pass ?all=true to see all novels (for dashboard)
-    // Everyone else only sees public novels
-    if (!all) query.visibility = 'public';
     if (search)   query.$or = [
       { title:  { $regex: search, $options: 'i' } },
       { author: { $regex: search, $options: 'i' } },
@@ -290,7 +286,6 @@ app.get('/api/novels/slug/:slug', async (req, res) => {
   try {
     const novel = await Novel.findOne({ slug: req.params.slug });
     if (!novel) return res.status(404).json({ error: 'Novel not found' });
-    if (novel.visibility === 'private') return res.status(403).json({ error: 'This novel is private' });
     novel.views += 1;
     await novel.save();
     res.json(novel);
@@ -301,7 +296,6 @@ app.get('/api/novels/:id', async (req, res) => {
   try {
     const novel = await Novel.findById(req.params.id);
     if (!novel) return res.status(404).json({ error: 'Novel not found' });
-    if (novel.visibility === 'private') return res.status(403).json({ error: 'This novel is private' });
     novel.views += 1; await novel.save();
     res.json(novel);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -309,12 +303,11 @@ app.get('/api/novels/:id', async (req, res) => {
 
 app.post('/api/novels', requireAdmin, handleUpload, async (req, res) => {
   try {
-    const { title, description, genres, tags, status, visibility } = req.body;
+    const { title, description, genres, tags, status } = req.body;
     if (!title) return res.status(400).json({ error: 'Title is required' });
     const slug = await uniqueSlug(title);
     const novel = new Novel({
       title, slug, description: description||'', status: status||'ongoing',
-      visibility: visibility||'public',
       author:        process.env.AUTHOR_NAME || 'idenwebstudio',
       authorId:      req.user.id,
       genres: JSON.parse(genres||'[]'), tags: JSON.parse(tags||'[]'),
@@ -328,17 +321,16 @@ app.post('/api/novels', requireAdmin, handleUpload, async (req, res) => {
 
 app.put('/api/novels/:id', requireOwner, handleUpload, async (req, res) => {
   try {
-    const { title, description, genres, tags, status, visibility } = req.body;
+    const { title, description, genres, tags, status } = req.body;
     const updates = {};
     if (title) {
       updates.title = title;
       updates.slug  = await uniqueSlug(title, req.params.id);
     }
     if (description !== undefined) updates.description = description;
-    if (status)     updates.status     = status;
-    if (visibility) updates.visibility = visibility;
-    if (genres)     updates.genres     = JSON.parse(genres);
-    if (tags)       updates.tags       = JSON.parse(tags);
+    if (status)      updates.status      = status;
+    if (genres)      updates.genres      = JSON.parse(genres);
+    if (tags)        updates.tags        = JSON.parse(tags);
     if (req.file && cloudinaryConfigured) {
       if (req.novel.coverPublicId) await cloudinary.uploader.destroy(req.novel.coverPublicId);
       updates.cover = req.file.path; updates.coverPublicId = req.file.filename;
