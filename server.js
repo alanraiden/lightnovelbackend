@@ -111,7 +111,8 @@ const chapterSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 const commentSchema = new mongoose.Schema({
-  novelId:   { type: mongoose.Schema.Types.ObjectId, ref: 'Novel', required: true },
+  novelId:    { type: mongoose.Schema.Types.ObjectId, ref: 'Novel', required: true },
+  chapterNum: { type: Number, default: null }, // null = novel-level comment
   userId:    { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   userName:  { type: String, required: true },
   userAvatar:{ type: String, default: '' },
@@ -419,12 +420,16 @@ app.post('/api/novels/:id/rate', requireAuth, async (req, res) => {
 // GET comments for a novel
 app.get('/api/novels/:id/comments', async (req, res) => {
   try {
-    const { page = 1, limit = 20 } = req.query;
-    const comments = await Comment.find({ novelId: req.params.id })
+    const { page = 1, limit = 20, chapterNum } = req.query;
+    const query = { novelId: req.params.id };
+    if (chapterNum !== undefined) {
+      query.chapterNum = chapterNum === 'null' || chapterNum === '' ? null : Number(chapterNum);
+    }
+    const comments = await Comment.find(query)
       .sort({ createdAt: -1 })
       .limit(Number(limit))
       .skip((Number(page) - 1) * Number(limit));
-    const total = await Comment.countDocuments({ novelId: req.params.id });
+    const total = await Comment.countDocuments(query);
     res.json({ comments, total, pages: Math.ceil(total / limit) });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -432,11 +437,12 @@ app.get('/api/novels/:id/comments', async (req, res) => {
 // POST add comment
 app.post('/api/novels/:id/comments', requireAuth, async (req, res) => {
   try {
-    const { text } = req.body;
+    const { text, chapterNum } = req.body;
     if (!text || !text.trim()) return res.status(400).json({ error: 'Comment cannot be empty' });
     if (text.length > 1000) return res.status(400).json({ error: 'Comment too long (max 1000 chars)' });
     const comment = await Comment.create({
       novelId:    req.params.id,
+      chapterNum: chapterNum != null ? Number(chapterNum) : null,
       userId:     req.user.id,
       userName:   req.user.name,
       userAvatar: req.user.avatar || '',
