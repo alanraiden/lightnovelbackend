@@ -275,7 +275,7 @@ app.get('/api/novels', async (req, res) => {
       { author: { $regex: search, $options: 'i' } },
       { tags:   { $regex: search, $options: 'i' } },
     ];
-    const sortMap = { rating:{rating:-1}, views:{views:-1}, new:{createdAt:-1}, chapters:{chapterCount:-1} };
+    const sortMap = { rating:{rating:-1}, views:{views:-1}, new:{updatedAt:-1}, added:{createdAt:-1}, chapters:{chapterCount:-1} };
     const novels  = await Novel.find(query).sort(sortMap[sort]||{rating:-1}).limit(Number(limit)).skip((Number(page)-1)*Number(limit));
     const total   = await Novel.countDocuments(query);
     res.json({ novels, total, pages: Math.ceil(total/limit) });
@@ -376,7 +376,7 @@ app.post('/api/novels/:id/chapters', requireOwner, async (req, res) => {
     const wordCount = content.split(/\s+/).filter(Boolean).length;
     const chapter   = new Chapter({ novelId: req.params.id, authorId: req.user.id, number, title, content, wordCount });
     await chapter.save();
-    await Novel.findByIdAndUpdate(req.params.id, { $inc: { chapterCount: 1 } });
+    await Novel.findByIdAndUpdate(req.params.id, { $inc: { chapterCount: 1 }, $set: { updatedAt: new Date() } });
     res.status(201).json(chapter);
   } catch (err) { console.error('Create chapter error:', err); res.status(400).json({ error: err.message }); }
 });
@@ -398,7 +398,7 @@ app.delete('/api/novels/:id/chapters/:num', requireOwner, async (req, res) => {
   try {
     const chapter = await Chapter.findOneAndDelete({ novelId: req.params.id, number: Number(req.params.num) });
     if (!chapter) return res.status(404).json({ error: 'Chapter not found' });
-    await Novel.findByIdAndUpdate(req.params.id, { $inc: { chapterCount: -1 } });
+    await Novel.findByIdAndUpdate(req.params.id, { $inc: { chapterCount: -1 }, $set: { updatedAt: new Date() } });
     res.json({ message: 'Chapter deleted' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
