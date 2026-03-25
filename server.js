@@ -74,7 +74,7 @@ mongoose.connect(process.env.MONGODB_URI)
 
 // ── Schemas ───────────────────────────────────────────────────────────────────
 const userSchema = new mongoose.Schema({
-  googleId:     { type: String, default: null },
+  googleId:     { type: String, default: null, sparse: true },
   email:        { type: String, required: true, unique: true, lowercase: true, trim: true },
   name:         { type: String, required: true, trim: true },
   password:     { type: String, default: null },   // null for Google-only users
