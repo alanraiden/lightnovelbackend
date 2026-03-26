@@ -381,6 +381,57 @@ app.post('/api/novels/:id/chapters', requireOwner, async (req, res) => {
   } catch (err) { console.error('Create chapter error:', err); res.status(400).json({ error: err.message }); }
 });
 
+// ── Bulk chapter import ───────────────────────────────────────────────────────
+// POST /api/novels/:id/chapters/bulk
+// Body: { chapters: [{ number, title, content }, ...], skipDuplicates: true }
+app.post('/api/novels/:id/chapters/bulk', requireOwner, async (req, res) => {
+  try {
+    const { chapters, skipDuplicates = true } = req.body;
+    if (!Array.isArray(chapters) || chapters.length === 0)
+      return res.status(400).json({ error: 'chapters array is required and must not be empty' });
+
+    const results  = { created: 0, skipped: 0, errors: [] };
+    const novelId  = req.params.id;
+    const authorId = req.user.id;
+
+    for (const ch of chapters) {
+      const { number, title, content } = ch;
+      if (!number || !title || !content) {
+        results.errors.push({ number, reason: 'Missing number, title, or content' });
+        continue;
+      }
+      try {
+        const existing = await Chapter.findOne({ novelId, number: Number(number) });
+        if (existing) {
+          if (skipDuplicates) { results.skipped++; continue; }
+          // overwrite mode
+          const wordCount = content.split(/\s+/).filter(Boolean).length;
+          await Chapter.findOneAndUpdate({ novelId, number: Number(number) }, { title, content, wordCount });
+          results.created++;
+        } else {
+          const wordCount = content.split(/\s+/).filter(Boolean).length;
+          await Chapter.create({ novelId, authorId, number: Number(number), title, content, wordCount });
+          results.created++;
+        }
+      } catch (e) {
+        results.errors.push({ number, reason: e.message });
+      }
+    }
+
+    // Update novel chapterCount + updatedAt
+    const chapterCount = await Chapter.countDocuments({ novelId });
+    await Novel.findByIdAndUpdate(novelId, { chapterCount, updatedAt: new Date() });
+
+    res.status(201).json({
+      message: `Import complete: ${results.created} created, ${results.skipped} skipped, ${results.errors.length} errors`,
+      ...results,
+    });
+  } catch (err) {
+    console.error('Bulk import error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.put('/api/novels/:id/chapters/:num', requireOwner, async (req, res) => {
   try {
     const { title, content } = req.body;
