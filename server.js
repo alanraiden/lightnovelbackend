@@ -265,7 +265,7 @@ app.get('/api/auth/me', requireAuth, async (req, res) => {
 // ── Novel routes ──────────────────────────────────────────────────────────────
 app.get('/api/novels', async (req, res) => {
   try {
-    const { genre, status, sort='rating', search, limit=20, page=1, authorId } = req.query;
+    const { genre, status, sort='rating', search, limit=20, page=1, authorId, since } = req.query;
     const query = {};
     if (genre)    query.genres   = genre;
     if (status)   query.status   = status;
@@ -275,6 +275,14 @@ app.get('/api/novels', async (req, res) => {
       { author: { $regex: search, $options: 'i' } },
       { tags:   { $regex: search, $options: 'i' } },
     ];
+    // since: filter novels updated within a time period (for trending tabs)
+    if (since) {
+      const days = Number(since);
+      if (!isNaN(days) && days > 0) {
+        const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+        query.updatedAt = { $gte: cutoff };
+      }
+    }
     const sortMap = { rating:{rating:-1}, views:{views:-1}, new:{updatedAt:-1}, added:{createdAt:-1}, chapters:{chapterCount:-1} };
     const novels  = await Novel.find(query).sort(sortMap[sort]||{rating:-1}).limit(Number(limit)).skip((Number(page)-1)*Number(limit));
     const total   = await Novel.countDocuments(query);
