@@ -98,6 +98,7 @@ const novelSchema = new mongoose.Schema({
   ratingCount:   { type: Number, default: 0 },
   views:         { type: Number, default: 0 },
   chapterCount:  { type: Number, default: 0 },
+  isOriginal:    { type: Boolean, default: false },
 }, { timestamps: true });
 
 const chapterSchema = new mongoose.Schema({
@@ -312,7 +313,7 @@ app.get('/api/novels/:id', async (req, res) => {
 
 app.post('/api/novels', requireAdmin, handleUpload, async (req, res) => {
   try {
-    const { title, description, genres, tags, status } = req.body;
+    const { title, description, genres, tags, status, isOriginal } = req.body;
     if (!title) return res.status(400).json({ error: 'Title is required' });
     const slug = await uniqueSlug(title);
     const novel = new Novel({
@@ -322,6 +323,7 @@ app.post('/api/novels', requireAdmin, handleUpload, async (req, res) => {
       genres: JSON.parse(genres||'[]'), tags: JSON.parse(tags||'[]'),
       cover:         req.file?.path     || '',
       coverPublicId: req.file?.filename || '',
+      isOriginal:    isOriginal === 'true' || isOriginal === true,
     });
     await novel.save();
     res.status(201).json(novel);
@@ -330,7 +332,7 @@ app.post('/api/novels', requireAdmin, handleUpload, async (req, res) => {
 
 app.put('/api/novels/:id', requireOwner, handleUpload, async (req, res) => {
   try {
-    const { title, description, genres, tags, status } = req.body;
+    const { title, description, genres, tags, status, isOriginal } = req.body;
     const updates = {};
     if (title) {
       updates.title = title;
@@ -340,6 +342,7 @@ app.put('/api/novels/:id', requireOwner, handleUpload, async (req, res) => {
     if (status)      updates.status      = status;
     if (genres)      updates.genres      = JSON.parse(genres);
     if (tags)        updates.tags        = JSON.parse(tags);
+    if (isOriginal !== undefined) updates.isOriginal = isOriginal === 'true' || isOriginal === true;
     if (req.file && cloudinaryConfigured) {
       if (req.novel.coverPublicId) await cloudinary.uploader.destroy(req.novel.coverPublicId);
       updates.cover = req.file.path; updates.coverPublicId = req.file.filename;
