@@ -1,4 +1,5 @@
 const express   = require('express');
+const cron      = require('node-cron');
 const mongoose  = require('mongoose');
 const cors      = require('cors');
 const bcrypt    = require('bcryptjs');
@@ -97,6 +98,9 @@ const novelSchema = new mongoose.Schema({
   rating:        { type: Number, default: 0 },
   ratingCount:   { type: Number, default: 0 },
   views:         { type: Number, default: 0 },
+  viewsToday:    { type: Number, default: 0 },
+  viewsWeek:     { type: Number, default: 0 },
+  viewsMonth:    { type: Number, default: 0 },
   chapterCount:  { type: Number, default: 0 },
   isOriginal:    { type: Boolean, default: false },
 }, { timestamps: true });
@@ -266,7 +270,7 @@ app.get('/api/auth/me', requireAuth, async (req, res) => {
 // ── Novel routes ──────────────────────────────────────────────────────────────
 app.get('/api/novels', async (req, res) => {
   try {
-    const { genre, status, sort='rating', search, limit=20, page=1, authorId, since } = req.query;
+    const { genre, status, sort='rating', search, limit=20, page=1, authorId } = req.query;
     const query = {};
     if (genre)    query.genres   = genre;
     if (status)   query.status   = status;
@@ -276,15 +280,16 @@ app.get('/api/novels', async (req, res) => {
       { author: { $regex: search, $options: 'i' } },
       { tags:   { $regex: search, $options: 'i' } },
     ];
-    // since: filter novels updated within a time period (for trending tabs)
-    if (since) {
-      const days = Number(since);
-      if (!isNaN(days) && days > 0) {
-        const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-        query.updatedAt = { $gte: cutoff };
-      }
-    }
-    const sortMap = { rating:{rating:-1}, views:{views:-1}, new:{updatedAt:-1}, added:{createdAt:-1}, chapters:{chapterCount:-1} };
+    const sortMap = {
+      rating:  { rating: -1 },
+      views:   { views: -1 },
+      today:   { viewsToday: -1 },
+      week:    { viewsWeek: -1 },
+      month:   { viewsMonth: -1 },
+      new:     { updatedAt: -1 },
+      added:   { createdAt: -1 },
+      chapters:{ chapterCount: -1 },
+    };
     const novels  = await Novel.find(query).sort(sortMap[sort]||{rating:-1}).limit(Number(limit)).skip((Number(page)-1)*Number(limit));
     const total   = await Novel.countDocuments(query);
     res.json({ novels, total, pages: Math.ceil(total/limit) });
@@ -297,6 +302,9 @@ app.get('/api/novels/slug/:slug', async (req, res) => {
     const novel = await Novel.findOne({ slug: req.params.slug });
     if (!novel) return res.status(404).json({ error: 'Novel not found' });
     novel.views += 1;
+    novel.viewsToday += 1;
+    novel.viewsWeek  += 1;
+    novel.viewsMonth += 1;
     await novel.save();
     res.json(novel);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -306,7 +314,11 @@ app.get('/api/novels/:id', async (req, res) => {
   try {
     const novel = await Novel.findById(req.params.id);
     if (!novel) return res.status(404).json({ error: 'Novel not found' });
-    novel.views += 1; await novel.save();
+    novel.views += 1;
+    novel.viewsToday += 1;
+    novel.viewsWeek  += 1;
+    novel.viewsMonth += 1;
+    await novel.save();
     res.json(novel);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -387,7 +399,8 @@ app.post('/api/novels/:id/chapters', requireOwner, async (req, res) => {
     const wordCount = content.split(/\s+/).filter(Boolean).length;
     const chapter   = new Chapter({ novelId: req.params.id, authorId: req.user.id, number, title, content, wordCount });
     await chapter.save();
-    await Novel.findByIdAndUpdate(req.params.id, { $inc: { chapterCount: 1 }, $set: { updatedAt: new Date() } });
+    const newCount = await Chapter.countDocuments({ novelId: req.params.id });
+    await Novel.findByIdAndUpdate(req.params.id, { chapterCount: newCount, updatedAt: new Date() });
     res.status(201).json(chapter);
   } catch (err) { console.error('Create chapter error:', err); res.status(400).json({ error: err.message }); }
 });
@@ -460,7 +473,8 @@ app.delete('/api/novels/:id/chapters/:num', requireOwner, async (req, res) => {
   try {
     const chapter = await Chapter.findOneAndDelete({ novelId: req.params.id, number: Number(req.params.num) });
     if (!chapter) return res.status(404).json({ error: 'Chapter not found' });
-    await Novel.findByIdAndUpdate(req.params.id, { $inc: { chapterCount: -1 }, $set: { updatedAt: new Date() } });
+    const newCount = await Chapter.countDocuments({ novelId: req.params.id });
+    await Novel.findByIdAndUpdate(req.params.id, { chapterCount: newCount, updatedAt: new Date() });
     res.json({ message: 'Chapter deleted' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -618,6 +632,53 @@ app.get('/api/migrate-slugs', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// ── Cron jobs: reset period view counters ─────────────────────────────────────
+// Runs at midnight every day (UTC) — resets daily views
+cron.schedule('0 0 * * *', async () => {
+  try {
+    await Novel.updateMany({}, { $set: { viewsToday: 0 } });
+    console.log('[cron] viewsToday reset');
+  } catch (err) { console.error('[cron] daily reset failed:', err.message); }
+});
+
+// Runs at midnight every Monday — resets weekly views
+cron.schedule('0 0 * * 1', async () => {
+  try {
+    await Novel.updateMany({}, { $set: { viewsWeek: 0 } });
+    console.log('[cron] viewsWeek reset');
+  } catch (err) { console.error('[cron] weekly reset failed:', err.message); }
+});
+
+// Runs at midnight on the 1st of every month — resets monthly views
+cron.schedule('0 0 1 * *', async () => {
+  try {
+    await Novel.updateMany({}, { $set: { viewsMonth: 0 } });
+    console.log('[cron] viewsMonth reset');
+  } catch (err) { console.error('[cron] monthly reset failed:', err.message); }
+});
+
+
+// ── Admin: resync all novel chapterCounts from actual chapter documents ────────
+// Call once to fix any drift: GET /api/admin/resync-counts
+app.get('/api/admin/resync-counts', requireAdmin, async (req, res) => {
+  try {
+    const novels = await Novel.find({}).select('_id title chapterCount');
+    const results = [];
+    for (const novel of novels) {
+      const actual = await Chapter.countDocuments({ novelId: novel._id });
+      if (actual !== novel.chapterCount) {
+        await Novel.findByIdAndUpdate(novel._id, { chapterCount: actual });
+        results.push({ title: novel.title, was: novel.chapterCount, now: actual });
+      }
+    }
+    res.json({
+      message: `Resynced ${results.length} novels`,
+      fixed: results,
+      checked: novels.length,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 const PORT = process.env.PORT || 5000;
